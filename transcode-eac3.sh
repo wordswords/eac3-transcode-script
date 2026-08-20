@@ -62,23 +62,30 @@ require_dependencies() {
 # ffprobe helpers (single responsibility: extract data)
 # ----------------------------------------------------------------------------
 
-# Emit audio streams as "index,codec_name,channels" lines.
+# Emit audio streams as "index,codec_name,channels" lines. Carriage returns
+# are stripped so the script behaves identically on Windows (CRLF ffprobe) and
+# Linux.
 probe_audio_streams() {
     local file="$1"
     ffprobe -v error \
         -select_streams a \
         -show_entries stream=index,codec_name,channels \
         -of csv=p=0 \
-        -- "$file" 2>/dev/null
+        -- "$file" 2>/dev/null \
+        | tr -d '\r'
 }
 
-# Emit every stream as "index,codec_type,codec_name,channels" lines.
+# Emit every stream as "index,codec_name,codec_type,channels" lines.
+# Note: ffmpeg emits fields in this fixed order regardless of the
+# -show_entries request order. Carriage returns are stripped for
+# cross-platform consistency.
 probe_all_streams() {
     local file="$1"
     ffprobe -v error \
         -show_entries stream=index,codec_type,codec_name,channels \
         -of csv=p=0 \
-        -- "$file" 2>/dev/null
+        -- "$file" 2>/dev/null \
+        | tr -d '\r'
 }
 
 # Print the container duration in seconds.
@@ -87,7 +94,8 @@ probe_duration() {
     ffprobe -v error \
         -show_entries format=duration \
         -of default=noprint_wrappers=1:nokey=1 \
-        -- "$file" 2>/dev/null
+        -- "$file" 2>/dev/null \
+        | tr -d '\r'
 }
 
 # ----------------------------------------------------------------------------
@@ -140,8 +148,10 @@ resolve_bitrate() {
 # stream. Results are stored in the caller-provided array names.
 build_ffmpeg_stream_arguments() {
     local file="$1"
-    local -n map_args_ref="$2"
-    local -n codec_args_ref="$3"
+    local map_args_name="$2"
+    local codec_args_name="$3"
+    local -n map_args_ref="$map_args_name"
+    local -n codec_args_ref="$codec_args_name"
 
     local eac3_indices=()
     mapfile -t eac3_indices < <(find_eac3_stream_indices "$file")
@@ -153,20 +163,20 @@ build_ffmpeg_stream_arguments() {
     done
 
     local output_index=0
-    local line stream_index stream_type codec_name channels channel_count output_bitrate
+    local line stream_index codec_name stream_type channels channel_count output_bitrate
 
-    while IFS=',' read -r stream_index stream_type codec_name channels; do
+    while IFS=',' read -r stream_index codec_name stream_type channels; do
         map_args_ref+=("-map" "0:$stream_index")
 
         if [[ "$stream_type" == "audio" && -n "${eac3_lookup[$stream_index]:-}" ]]; then
-            append_eac3_copy_args codec_args_ref "$output_index"
+            append_eac3_copy_args "$codec_args_name" "$output_index"
             (( output_index += 1 ))
 
             # Append an AAC rendering of the same input stream.
             map_args_ref+=("-map" "0:$stream_index")
             channel_count="$(resolve_channel_count "$channels")"
             output_bitrate="$(resolve_bitrate "$channel_count")"
-            append_aac_args codec_args_ref "$output_index" "$channel_count" "$output_bitrate"
+            append_aac_args "$codec_args_name" "$output_index" "$channel_count" "$output_bitrate"
             (( output_index += 1 ))
         else
             codec_args_ref+=("-c:$output_index" "copy")
@@ -177,10 +187,10 @@ build_ffmpeg_stream_arguments() {
 
 # Copy an E-AC-3 stream and clear its default disposition.
 append_eac3_copy_args() {
-    local -n codec_args_ref="$1"
+    local -n target_array="$1"
     local output_index="$2"
 
-    codec_args_ref+=(
+    target_array+=(
         "-c:$output_index" "copy"
         "-disposition:$output_index" "0"
     )
@@ -188,12 +198,12 @@ append_eac3_copy_args() {
 
 # Encode an AAC stream and mark it as the default track.
 append_aac_args() {
-    local -n codec_args_ref="$1"
+    local -n target_array="$1"
     local output_index="$2"
     local channel_count="$3"
     local output_bitrate="$4"
 
-    codec_args_ref+=(
+    target_array+=(
         "-c:$output_index" "aac"
         "-b:$output_index" "$output_bitrate"
         "-ac:$output_index" "$channel_count"
@@ -367,4 +377,7 @@ main() {
     log "Operation complete: $replaced_file"
 }
 
-main "$@"
+# Only run when executed directly, not when sourced (e.g. by the test suite).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

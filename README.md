@@ -1,0 +1,39 @@
+# eac3-transcode-script
+
+Detect media files containing E-AC-3 audio and add a Windows 11 / Plex
+compatible AAC track (set as the default) while preserving the original E-AC-3
+stream, verifying integrity before replacing the original file in place.
+
+Supported containers: MKV and MP4.
+
+## Usage
+
+```bash
+./transcode-eac3.sh /path/to/media/file.mkv
+```
+
+Requirements: `ffmpeg` and `ffprobe` on the `PATH` (available from the
+AlmaLinux base/extras repositories via `dnf install ffmpeg`).
+
+## Testing
+
+The test suite is dependency-free and runs on any Bash 4.3+. It locates a real
+`ffmpeg`/`ffprobe` automatically — either downloaded under `vendor/bin/` (for
+Windows) or installed on the system (Linux/AlmaLinux) — and generates real media
+fixtures on the fly.
+
+```bash
+./tests/run_tests.sh
+```
+
+### Test layout
+
+| File | What it covers |
+| --- | --- |
+| `tests/test_pure_functions.bash` | Channel-count clamping, bitrate math, temp-path construction |
+| `tests/test_detection.bash` | E-AC-3 stream detection against real media |
+| `tests/test_arguments.bash` | ffmpeg `-map`/`-c`/`-disposition` argument construction |
+| `tests/test_integrity.bash` | Decode verification, duration comparison, file replacement, cleanup |
+| `tests/test_main.bash` | Full end-to-end transcodes with real ffmpeg/ffprobe (MKV) |
+| `tests/test_mp4.bash` | End-to-end transcodes confirming MP4 behaves like MKV |
+| `tests/test_helper.bash` | Shared minimal test framework + fixtures |
