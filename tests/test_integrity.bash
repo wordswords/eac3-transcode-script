@@ -13,25 +13,39 @@ source "$SCRIPT_UNDER_TEST"
 
 # verify_decode_clean ---------------------------------------------------------
 
-begin_test "verify_decode_clean succeeds when ffmpeg reports no errors"
+begin_test "verify_decode_clean succeeds on a clean decode (exit 0)"
 : > "$TEMP_DIR/ctrl/ffmpeg_stderr"
 rm -f "$TEMP_DIR/ctrl/ffmpeg_rc"
 make_fake_media_file "$TEMP_DIR/out.mkv"
 if verify_decode_clean "$TEMP_DIR/out.mkv"; then
-    ok "decode clean passes on no errors"
+    ok "decode clean passes on exit 0"
 else
-    fail "decode clean should pass on no errors"
+    fail "decode clean should pass on a clean decode"
 fi
 
-begin_test "verify_decode_clean fails when ffmpeg reports errors"
+begin_test "verify_decode_clean succeeds despite benign null-muxer stderr"
 make_fake_media_file "$TEMP_DIR/out.mkv"
-set_ffmpeg_stderr "Invalid data found when processing input"
+set_ffmpeg_stderr "Application provided invalid, non monotonically increasing dts to muxer"
+rm -f "$TEMP_DIR/ctrl/ffmpeg_rc"
+# ffmpeg still exits 0 despite the warning; the decode is clean.
 if verify_decode_clean "$TEMP_DIR/out.mkv"; then
-    fail "decode clean should fail on decoder errors"
+    ok "decode clean ignores benign stderr when exit code is 0"
 else
-    ok "decode clean fails on decoder errors"
+    fail "benign stderr should not fail the decode check"
 fi
 : > "$TEMP_DIR/ctrl/ffmpeg_stderr"
+
+begin_test "verify_decode_clean fails when ffmpeg exits non-zero"
+make_fake_media_file "$TEMP_DIR/out.mkv"
+set_ffmpeg_rc 1
+set_ffmpeg_stderr "Invalid data found when processing input"
+if verify_decode_clean "$TEMP_DIR/out.mkv"; then
+    fail "decode clean should fail when ffmpeg exits non-zero"
+else
+    ok "decode clean fails when ffmpeg exits non-zero"
+fi
+: > "$TEMP_DIR/ctrl/ffmpeg_stderr"
+rm -f "$TEMP_DIR/ctrl/ffmpeg_rc"
 
 # verify_duration_matches -----------------------------------------------------
 

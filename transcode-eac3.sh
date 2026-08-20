@@ -288,25 +288,29 @@ transcode_file() {
 # Integrity verification
 # ----------------------------------------------------------------------------
 
-# Decode the whole file; return 0 if no decoder errors were reported. Uses
-# multi-threading across all cores. Progress is streamed to stdout; genuine
-# decoder errors are captured from stderr.
+# Decode the whole file; return 0 on a clean decode. Success is determined by
+# ffmpeg's exit code, not by stderr output: the null muxer emits benign DTS
+# warnings (e.g. for x265 sources) that do not indicate corruption. Progress is
+# streamed to stdout; genuine failures surface ffmpeg's stderr and a non-zero
+# exit code.
 verify_decode_clean() {
     local output_file="$1"
     local stderr_log
+    local ffmpeg_status
     stderr_log="$(mktemp)"
 
     # `-progress pipe:1` emits a machine-readable progress meter on stdout,
-    # while `-v error` keeps stderr limited to genuine errors/warnings.
+    # while stderr is captured separately so we can inspect it on failure.
+    ffmpeg_status=0
     ffmpeg -hide_banner -v error \
         -threads 0 \
         -i "$output_file" \
         -f null - \
         -progress pipe:1 \
-        2>"$stderr_log" || true
+        2>"$stderr_log" || ffmpeg_status=$?
 
-    # Report any decoder errors captured on stderr, then clean up the log.
-    if [[ -s "$stderr_log" ]]; then
+    # A non-zero exit code means the decode failed; report captured diagnostics.
+    if [[ "$ffmpeg_status" -ne 0 ]]; then
         cat "$stderr_log" >&2
         rm -f -- "$stderr_log"
         return 1
