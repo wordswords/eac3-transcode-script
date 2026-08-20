@@ -36,9 +36,6 @@ for the directory batch script.
 - **Audio-only transcoding** — video and the original E-AC-3 stream are copied
   bit-for-bit, so only the AAC companion track is encoded (CPU audio encode,
   typically 50–150× realtime).
-- **Hardware-accelerated decode** — the integrity check uses `-hwaccel auto`,
-  so supported GPUs (NVIDIA/`cuda`, Intel/`vaapi`, etc.) accelerate the full
-  video decode during verification and fall back to software automatically.
 - **Multi-threaded** — both transcode and verification use `-threads 0` to use
   all available cores.
 - **Live progress** — the transcode shows ffmpeg's `-stats` line

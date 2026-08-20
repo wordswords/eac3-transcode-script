@@ -244,10 +244,21 @@ make_temporary_output_path() {
         "$input_dir" "$input_basename" "$$" "$file_extension"
 }
 
-# Print the ffmpeg flags that select hardware-accelerated decode (falling back
-# to software) and max multi-threading, shared by transcode and verification.
-performance_flags() {
-    printf '%s\n' "-hwaccel" "auto" "-threads" "0"
+# ----------------------------------------------------------------------------
+# Transcoding
+# ----------------------------------------------------------------------------
+
+# Build a temporary output path alongside the source file.
+make_temporary_output_path() {
+    local input_file="$1"
+    local input_dir input_basename file_extension
+
+    input_dir="$(dirname -- "$input_file")"
+    input_basename="$(basename -- "$input_file")"
+    file_extension="${input_basename##*.}"
+
+    printf '%s/.%s.transcoding.%s.%s\n' \
+        "$input_dir" "$input_basename" "$$" "$file_extension"
 }
 
 transcode_file() {
@@ -255,14 +266,13 @@ transcode_file() {
     local output_file="$2"
     local -n map_args_ref="$3"
     local -n codec_args_ref="$4"
-    local -a perf=()
-    mapfile -t perf < <(performance_flags)
 
     # Video and the original E-AC-3 stream are copied bit-for-bit, so the only
-    # encode is audio->AAC. `-stats` renders a live progress line at a reduced
-    # log level so we don't dump the full stream mapping.
+    # encode is audio->AAC. `-threads 0` uses all cores, and `-stats` renders a
+    # live progress line at a reduced log level so we don't dump the full
+    # stream mapping.
     ffmpeg -hide_banner -loglevel warning -y \
-        "${perf[@]}" \
+        -threads 0 \
         -i "$input_file" \
         "${map_args_ref[@]}" \
         "${codec_args_ref[@]}" \
@@ -279,20 +289,17 @@ transcode_file() {
 # ----------------------------------------------------------------------------
 
 # Decode the whole file; return 0 if no decoder errors were reported. Uses
-# hardware-accelerated decode where available and multi-threading across all
-# cores. Progress is streamed to stdout; genuine decoder errors are captured
-# from stderr.
+# multi-threading across all cores. Progress is streamed to stdout; genuine
+# decoder errors are captured from stderr.
 verify_decode_clean() {
     local output_file="$1"
     local stderr_log
-    local -a perf=()
     stderr_log="$(mktemp)"
-    mapfile -t perf < <(performance_flags)
 
     # `-progress pipe:1` emits a machine-readable progress meter on stdout,
     # while `-v error` keeps stderr limited to genuine errors/warnings.
     ffmpeg -hide_banner -v error \
-        "${perf[@]}" \
+        -threads 0 \
         -i "$output_file" \
         -f null - \
         -progress pipe:1 \
