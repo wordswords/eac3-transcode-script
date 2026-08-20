@@ -244,23 +244,6 @@ make_temporary_output_path() {
         "$input_dir" "$input_basename" "$$" "$file_extension"
 }
 
-# ----------------------------------------------------------------------------
-# Transcoding
-# ----------------------------------------------------------------------------
-
-# Build a temporary output path alongside the source file.
-make_temporary_output_path() {
-    local input_file="$1"
-    local input_dir input_basename file_extension
-
-    input_dir="$(dirname -- "$input_file")"
-    input_basename="$(basename -- "$input_file")"
-    file_extension="${input_basename##*.}"
-
-    printf '%s/.%s.transcoding.%s.%s\n' \
-        "$input_dir" "$input_basename" "$$" "$file_extension"
-}
-
 transcode_file() {
     local input_file="$1"
     local output_file="$2"
