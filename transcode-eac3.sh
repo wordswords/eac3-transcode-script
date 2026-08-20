@@ -235,13 +235,20 @@ transcode_file() {
     local -n map_args_ref="$3"
     local -n codec_args_ref="$4"
 
+    # Video and the original E-AC-3 stream are copied bit-for-bit, so the only
+    # encode is audio->AAC. `-hwaccel auto` selects the fastest available video
+    # decoder (falling back to software if none work), `-threads 0` uses all
+    # cores, and `-stats` renders a live progress line (at a reduced log level
+    # so we don't dump the full stream mapping).
     ffmpeg -hide_banner -loglevel warning -y \
+        -hwaccel auto \
         -i "$input_file" \
         "${map_args_ref[@]}" \
         "${codec_args_ref[@]}" \
         -map_metadata 0 \
         -map_chapters 0 \
         -movflags +faststart \
+        -stats -threads 0 \
         -- "$output_file" 2>&1 \
         || die "ffmpeg transcoding failed"
 }
@@ -250,20 +257,37 @@ transcode_file() {
 # Integrity verification
 # ----------------------------------------------------------------------------
 
-# Decode the whole file; return 0 if no decoder errors were reported.
+# ----------------------------------------------------------------------------
+# Integrity verification
+# ----------------------------------------------------------------------------
+
+# Decode the whole file; return 0 if no decoder errors were reported. Uses
+# hardware-accelerated decode where available and multi-threading across all
+# cores. Progress is streamed to stdout; genuine decoder errors are captured
+# from stderr.
 verify_decode_clean() {
     local output_file="$1"
-    local decode_errors
+    local stderr_log
+    stderr_log="$(mktemp)"
 
-    decode_errors="$(ffmpeg -hide_banner -v error \
+    # `-progress pipe:1` emits a machine-readable progress meter on stdout,
+    # while `-v error` keeps stderr limited to genuine errors/warnings.
+    ffmpeg -hide_banner -v error \
+        -hwaccel auto \
         -i "$output_file" \
-        -f null - 2>&1 || true)"
+        -threads 0 \
+        -f null - \
+        -progress pipe:1 \
+        2>"$stderr_log" || true
 
-    if [[ -n "$decode_errors" ]]; then
-        printf '%s\n' "$decode_errors" >&2
+    # Report any decoder errors captured on stderr, then clean up the log.
+    if [[ -s "$stderr_log" ]]; then
+        cat "$stderr_log" >&2
+        rm -f -- "$stderr_log"
         return 1
     fi
 
+    rm -f -- "$stderr_log"
     return 0
 }
 

@@ -31,6 +31,20 @@ Requirements: `ffmpeg` and `ffprobe` on the `PATH` (available from the
 AlmaLinux base/extras repositories via `dnf install ffmpeg`), plus `screen`
 for the directory batch script.
 
+## Performance & progress
+
+- **Audio-only transcoding** — video and the original E-AC-3 stream are copied
+  bit-for-bit, so only the AAC companion track is encoded (CPU audio encode,
+  typically 50–150× realtime).
+- **Hardware-accelerated decode** — the integrity check uses `-hwaccel auto`,
+  so supported GPUs (NVIDIA/`cuda`, Intel/`vaapi`, etc.) accelerate the full
+  video decode during verification and fall back to software automatically.
+- **Multi-threaded** — both transcode and verification use `-threads 0` to use
+  all available cores.
+- **Live progress** — the transcode shows ffmpeg's `-stats` line
+  (`frame=... speed=...`), and the integrity check streams a machine-readable
+  `-progress` meter (`out_time`, `speed`, `progress=end`).
+
 ## Testing
 
 The test suite is dependency-free and runs on any Bash 4.3+. It locates a real
