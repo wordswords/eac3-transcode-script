@@ -37,7 +37,7 @@ assert_equal "$before" "$after" "MP4 bytes unchanged"
 # Case 2: E-AC-3 -> transcoded in place, now has E-AC-3 + default AAC
 # ---------------------------------------------------------------------------
 
-begin_test "main transcodes an E-AC-3 MP4 in place, adding a default AAC stream"
+begin_test "main transcodes an E-AC-3 MP4 in place, adding AAC and AC-3 5.1"
 make_eac3_mp4_file "$TEMP_DIR/eac3.mp4"
 
 (
@@ -46,7 +46,7 @@ make_eac3_mp4_file "$TEMP_DIR/eac3.mp4"
 assert_status 0 "$?" "main exit status"
 assert_file_exists "$TEMP_DIR/eac3.mp4" "MP4 still present"
 
-assert_transcoded_with_default_aac "$TEMP_DIR/eac3.mp4"
+assert_transcoded_with_compat_streams "$TEMP_DIR/eac3.mp4"
 
 # ---------------------------------------------------------------------------
 # Case 3: the output container is still MP4 (faststart moved the moov atom)

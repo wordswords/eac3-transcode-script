@@ -163,6 +163,18 @@ make_aac_media_file()  { make_media_file "$1" aac; }
 make_eac3_mp4_file()   { make_media_file "$1" eac3; }
 make_aac_mp4_file()    { make_media_file "$1" aac; }
 
+# Generate a 1-second MKV whose single E-AC-3 stream is 5.1 surround.
+make_eac3_51_media_file() {
+    local path="$1"
+    mkdir -p "$(dirname "$path")"
+    "$REAL_FFMPEG" -hide_banner -loglevel error -y \
+        -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
+        -f lavfi -i "sine=frequency=1000:duration=1:sample_rate=48000" \
+        -af "aformat=channel_layouts=5.1" \
+        -c:v libx264 -c:a eac3 -shortest "$path" 2>&1
+    printf '%s' "$path"
+}
+
 # ----------------------------------------------------------------------------
 # Fake toolchain (for failure-branch tests)
 # ----------------------------------------------------------------------------
@@ -235,30 +247,43 @@ make_fake_media_file() {
 # End-to-end assertion helpers (shared by MKV and MP4 test suites)
 # ----------------------------------------------------------------------------
 
-# Assert that <path> now contains an E-AC-3 stream and a default AAC track.
-assert_transcoded_with_default_aac() {
+# Assert that <path> now contains an E-AC-3 stream, a default AAC track, and a
+# separate 5.1 AC-3 compatibility track.
+assert_transcoded_with_compat_streams() {
     local path="$1"
-    local audio_info default_index default_codec
+    local audio_info default_index default_codec ac3_channels
 
+    # Print index, codec_name, disposition.default, and channels per audio
+    # stream as CSV.
     audio_info="$("$REAL_FFPROBE" -v error \
         -select_streams a \
-        -show_entries stream=index,codec_name \
+        -show_entries stream=index,codec_name,channels \
         -show_entries stream_disposition=default \
         -of csv=p=0 \
         "$path")"
 
     assert_contains "$audio_info" "eac3" "E-AC-3 stream preserved"
     assert_contains "$audio_info" "aac" "AAC companion added"
+    assert_contains "$audio_info" "ac3" "AC-3 companion added"
 
+    # The default track must be AAC. Extract the index of the stream whose
+    # default disposition is 1, then confirm its codec is aac.
     default_index="$(
         printf '%s\n' "$audio_info" \
-            | awk -F, '$3 == 1 { print $1; exit }'
+            | awk -F, '$4 == 1 { print $1; exit }'
     )"
     default_codec="$(
         printf '%s\n' "$audio_info" \
             | awk -F, -v idx="$default_index" '$1 == idx { print $2 }'
     )"
     assert_equal "aac" "$default_codec" "default track is AAC"
+
+    # The AC-3 track must be 5.1 (6 channels).
+    ac3_channels="$(
+        printf '%s\n' "$audio_info" \
+            | awk -F, '$2 == "ac3" { print $3; exit }'
+    )"
+    assert_equal "6" "$ac3_channels" "AC-3 track is 5.1"
 }
 
 # Assert that <path> contains no leftover transcode temp files beside it.

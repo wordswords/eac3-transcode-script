@@ -1,8 +1,13 @@
 # eac3-transcode-script
 
-Detect media files containing E-AC-3 audio and add a Windows 11 / Plex
-compatible AAC track (set as the default) while preserving the original E-AC-3
-stream, verifying integrity before replacing the original file in place.
+Detect media files containing E-AC-3 audio and add Windows 11 / Plex
+compatible audio tracks while preserving the original E-AC-3 stream. For each
+E-AC-3 stream the script adds:
+
+- an **AAC** track (set as the default), and
+- a separate **5.1 AC-3** track.
+
+Integrity is verified before replacing the original file in place.
 
 Supported containers: MKV and MP4.
 
@@ -34,8 +39,8 @@ for the directory batch script.
 ## Performance & progress
 
 - **Audio-only transcoding** — video and the original E-AC-3 stream are copied
-  bit-for-bit, so only the AAC companion track is encoded (CPU audio encode,
-  typically 50–150× realtime).
+  bit-for-bit. Only the AAC and 5.1 AC-3 companion tracks are encoded (CPU audio
+  encode, typically 50–150× realtime).
 - **Multi-threaded** — both transcode and verification use `-threads 0` to use
   all available cores.
 - **Live progress** — the transcode shows ffmpeg's `-stats` line

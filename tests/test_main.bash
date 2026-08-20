@@ -36,7 +36,7 @@ assert_equal "$before" "$after" "file bytes unchanged"
 # Case 2: E-AC-3 -> transcoded in place, now has E-AC-3 + default AAC
 # ---------------------------------------------------------------------------
 
-begin_test "main transcodes E-AC-3 in place, adding a default AAC stream"
+begin_test "main transcodes E-AC-3 in place, adding AAC and AC-3 5.1 streams"
 make_eac3_media_file "$TEMP_DIR/eac3.mkv"
 
 (
@@ -45,9 +45,30 @@ make_eac3_media_file "$TEMP_DIR/eac3.mkv"
 assert_status 0 "$?" "main exit status"
 assert_file_exists "$TEMP_DIR/eac3.mkv" "file still present"
 
-# Verify the resulting streams: two audio streams, one eac3 + one aac, and the
-# default disposition is on the AAC stream.
-assert_transcoded_with_default_aac "$TEMP_DIR/eac3.mkv"
+# Verify the resulting streams: E-AC-3 preserved, plus a default AAC track and
+# a separate 5.1 AC-3 track.
+assert_transcoded_with_compat_streams "$TEMP_DIR/eac3.mkv"
+
+# ---------------------------------------------------------------------------
+# Case 2b: 5.1 E-AC-3 -> all six channels reproduced in the AC-3 stream
+# ---------------------------------------------------------------------------
+
+begin_test "5.1 E-AC-3 source reproduces all six channels in the AC-3 stream"
+make_eac3_51_media_file "$TEMP_DIR/surround.mkv"
+
+(
+    main "$TEMP_DIR/surround.mkv"
+)
+assert_status 0 "$?" "main exit status"
+
+# The AC-3 stream must be 5.1 and carry a surround channel layout.
+ac3_layout="$("$REAL_FFPROBE" -v error \
+    -select_streams a:2 \
+    -show_entries stream=codec_name,channels,channel_layout \
+    -of csv=p=0 \
+    "$TEMP_DIR/surround.mkv" | tr -d '\r')"
+assert_contains "$ac3_layout" "ac3,6" "AC-3 stream is 5.1 (6 channels)"
+assert_contains "$ac3_layout" "5.1" "AC-3 stream uses a surround layout"
 
 # ---------------------------------------------------------------------------
 # Case 3: temporary transcoding artifact is cleaned up

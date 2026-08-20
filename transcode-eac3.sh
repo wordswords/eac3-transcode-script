@@ -22,6 +22,9 @@ readonly MAX_AAC_CHANNELS=8            # upper bound on compatible-track channel
 readonly DURATION_TOLERANCE_SECONDS=1  # acceptable duration drift for the check
 readonly EAC3_CODEC="eac3"             # ffmpeg codec name for Dolby Digital Plus
 readonly DEFAULT_CHANNEL_COUNT=2       # fallback when a stream omits channel info
+readonly AC3_BITRATE="640k"            # bitrate for the 5.1 AC-3 compatibility track
+readonly AC3_CHANNEL_COUNT=6           # 5.1 surround = 6 channels
+readonly AC3_CHANNEL_LAYOUT="5.1"      # explicit surround layout for the AC-3 track
 
 # ----------------------------------------------------------------------------
 # Logging
@@ -151,8 +154,9 @@ resolve_bitrate() {
 # ----------------------------------------------------------------------------
 
 # Given the set of E-AC-3 indices, build the -map and per-stream -c/-disposition
-# arguments needed to copy every stream and add a default AAC track per E-AC-3
-# stream. Results are stored in the caller-provided array names.
+# arguments needed to copy every stream and, per E-AC-3 stream, add an AAC track
+# (the default) plus a separate 5.1 AC-3 compatibility track. Results are stored
+# in the caller-provided array names.
 build_ffmpeg_stream_arguments() {
     local file="$1"
     local map_args_name="$2"
@@ -176,14 +180,20 @@ build_ffmpeg_stream_arguments() {
         map_args_ref+=("-map" "0:$stream_index")
 
         if is_eac3_audio_stream "$stream_type" "${eac3_lookup[$stream_index]:-}"; then
-            append_eac3_copy_args "$codec_args_name" "$output_index"
+            append_copied_eac3 "$codec_args_name" "$output_index"
             (( output_index += 1 ))
 
-            # Append an AAC rendering of the same input stream.
-            map_args_ref+=("-map" "0:$stream_index")
             channel_count="$(resolve_channel_count "$channels")"
             output_bitrate="$(resolve_bitrate "$channel_count")"
-            append_aac_args "$codec_args_name" "$output_index" "$channel_count" "$output_bitrate"
+
+            # AAC compatibility track (the default one).
+            map_args_ref+=("-map" "0:$stream_index")
+            append_compat_aac "$codec_args_name" "$output_index" "$channel_count" "$output_bitrate"
+            (( output_index += 1 ))
+
+            # Separate 5.1 AC-3 compatibility track.
+            map_args_ref+=("-map" "0:$stream_index")
+            append_compat_ac3 "$codec_args_name" "$output_index"
             (( output_index += 1 ))
         else
             codec_args_ref+=("-c:$output_index" "copy")
@@ -201,7 +211,7 @@ is_eac3_audio_stream() {
 }
 
 # Copy an E-AC-3 stream and clear its default disposition.
-append_eac3_copy_args() {
+append_copied_eac3() {
     local -n target_array="$1"
     local output_index="$2"
 
@@ -212,7 +222,7 @@ append_eac3_copy_args() {
 }
 
 # Encode an AAC stream and mark it as the default track.
-append_aac_args() {
+append_compat_aac() {
     local -n target_array="$1"
     local output_index="$2"
     local channel_count="$3"
@@ -224,6 +234,23 @@ append_aac_args() {
         "-ac:$output_index" "$channel_count"
         "-metadata:s:$output_index" "title=Compatible AAC"
         "-disposition:$output_index" "default"
+    )
+}
+
+# Encode a fixed 5.1 AC-3 compatibility stream (not the default track). The
+# explicit channel layout guarantees all six source channels are reproduced in
+# the surround mix rather than being lost to an automatic downmix.
+append_compat_ac3() {
+    local -n target_array="$1"
+    local output_index="$2"
+
+    target_array+=(
+        "-c:$output_index" "ac3"
+        "-b:$output_index" "$AC3_BITRATE"
+        "-ac:$output_index" "$AC3_CHANNEL_COUNT"
+        "-channel_layout:$output_index" "$AC3_CHANNEL_LAYOUT"
+        "-metadata:s:$output_index" "title=Compatible AC3 5.1"
+        "-disposition:$output_index" "0"
     )
 }
 
