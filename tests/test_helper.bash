@@ -123,26 +123,18 @@ run_test_file_summary() {
 # ----------------------------------------------------------------------------
 
 # Prefer a vendored build (tests/vendor/bin), then anything on the PATH.
-resolve_real_ffprobe() {
-    local vendored="${TEST_ROOT_DIR}/../vendor/bin/ffprobe"
+resolve_real_tool() {
+    local tool_name="$1"
+    local vendored="${TEST_ROOT_DIR}/../vendor/bin/${tool_name}"
     if [[ -x "$vendored" || -f "$vendored" ]]; then
         printf '%s' "$vendored"
         return 0
     fi
-    command -v ffprobe
+    command -v "$tool_name"
 }
 
-resolve_real_ffmpeg() {
-    local vendored="${TEST_ROOT_DIR}/../vendor/bin/ffmpeg"
-    if [[ -x "$vendored" || -f "$vendored" ]]; then
-        printf '%s' "$vendored"
-        return 0
-    fi
-    command -v ffmpeg
-}
-
-REAL_FFPROBE="$(resolve_real_ffprobe)"
-REAL_FFMPEG="$(resolve_real_ffmpeg)"
+REAL_FFPROBE="$(resolve_real_tool ffprobe)"
+REAL_FFMPEG="$(resolve_real_tool ffmpeg)"
 
 have_real_tools() {
     [[ -n "$REAL_FFPROBE" && -n "$REAL_FFMPEG" ]]
@@ -152,50 +144,24 @@ have_real_tools() {
 # Fixture generation (real media)
 # ----------------------------------------------------------------------------
 
-# Generate a 1-second MKV containing an E-AC-3 audio stream (plus a video
-# stream). Prints the path.
-make_eac3_media_file() {
+# Generate a 1-second media file with a single audio stream of the given codec
+# (eac3 or aac) in a given container (mkv or mp4). Prints the path.
+make_media_file() {
     local path="$1"
+    local audio_codec="$2"
     mkdir -p "$(dirname "$path")"
     "$REAL_FFMPEG" -hide_banner -loglevel error -y \
         -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
         -f lavfi -i "sine=frequency=1000:duration=1" \
-        -c:v libx264 -c:a eac3 -shortest "$path" 2>&1
+        -c:v libx264 -c:a "$audio_codec" -shortest "$path" 2>&1
     printf '%s' "$path"
 }
 
-# Generate a 1-second MKV with a non-E-AC-3 (AAC) audio stream.
-make_aac_media_file() {
-    local path="$1"
-    mkdir -p "$(dirname "$path")"
-    "$REAL_FFMPEG" -hide_banner -loglevel error -y \
-        -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
-        -f lavfi -i "sine=frequency=1000:duration=1" \
-        -c:v libx264 -c:a aac -shortest "$path" 2>&1
-    printf '%s' "$path"
-}
-
-# Generate a 1-second MP4 containing an E-AC-3 audio stream.
-make_eac3_mp4_file() {
-    local path="$1"
-    mkdir -p "$(dirname "$path")"
-    "$REAL_FFMPEG" -hide_banner -loglevel error -y \
-        -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
-        -f lavfi -i "sine=frequency=1000:duration=1" \
-        -c:v libx264 -c:a eac3 -shortest "$path" 2>&1
-    printf '%s' "$path"
-}
-
-# Generate a 1-second MP4 with a non-E-AC-3 (AAC) audio stream.
-make_aac_mp4_file() {
-    local path="$1"
-    mkdir -p "$(dirname "$path")"
-    "$REAL_FFMPEG" -hide_banner -loglevel error -y \
-        -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
-        -f lavfi -i "sine=frequency=1000:duration=1" \
-        -c:v libx264 -c:a aac -shortest "$path" 2>&1
-    printf '%s' "$path"
-}
+# MKV / MP4, E-AC-3 / AAC convenience wrappers.
+make_eac3_media_file() { make_media_file "$1" eac3; }
+make_aac_media_file()  { make_media_file "$1" aac; }
+make_eac3_mp4_file()   { make_media_file "$1" eac3; }
+make_aac_mp4_file()    { make_media_file "$1" aac; }
 
 # ----------------------------------------------------------------------------
 # Fake toolchain (for failure-branch tests)
@@ -248,21 +214,16 @@ EOF
     export PATH="$bin_dir:$PATH"
 }
 
-set_ffprobe_output() {
-    printf '%s' "$1" > "$TEMP_DIR/ctrl/ffprobe_stdout"
+set_fake_control() {
+    local control_file="$1"
+    local content="$2"
+    printf '%s' "$content" > "$TEMP_DIR/ctrl/$control_file"
 }
 
-set_ffprobe_rc() {
-    printf '%s' "$1" > "$TEMP_DIR/ctrl/ffprobe_rc"
-}
-
-set_ffmpeg_rc() {
-    printf '%s' "$1" > "$TEMP_DIR/ctrl/ffmpeg_rc"
-}
-
-set_ffmpeg_stderr() {
-    printf '%s' "$1" > "$TEMP_DIR/ctrl/ffmpeg_stderr"
-}
+set_ffprobe_output() { set_fake_control ffprobe_stdout "$1"; }
+set_ffprobe_rc()     { set_fake_control ffprobe_rc "$1"; }
+set_ffmpeg_rc()      { set_fake_control ffmpeg_rc "$1"; }
+set_ffmpeg_stderr()  { set_fake_control ffmpeg_stderr "$1"; }
 
 make_fake_media_file() {
     local path="$1"

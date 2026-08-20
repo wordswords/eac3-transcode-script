@@ -11,35 +11,41 @@
 set -u
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export TESTS_DIR
 
 TOTAL_PASS=0
 TOTAL_FAIL=0
 FAILED_FILES=()
 
+# Parse the final "label: N passed, M failed" summary line, setting the
+# globals TEST_FILE_PASS and TEST_FILE_FAIL.
+extract_counts() {
+    local summary="$1"
+    local summary_line
+    summary_line="$(printf '%s\n' "$summary" | grep -E '^[^:]+: [0-9]+ passed, [0-9]+ failed' | tail -1)"
+    TEST_FILE_PASS="$(printf '%s\n' "$summary_line" | sed -E 's/.* ([0-9]+) passed,.*/\1/')"
+    TEST_FILE_FAIL="$(printf '%s\n' "$summary_line" | sed -E 's/.* ([0-9]+) failed/\1/')"
+    TEST_FILE_PASS="${TEST_FILE_PASS:-0}"
+    TEST_FILE_FAIL="${TEST_FILE_FAIL:-0}"
+}
+
 for test_file in "$TESTS_DIR"/test_*.bash; do
     [[ -e "$test_file" ]] || continue
-    case "$(basename "$test_file")" in
-        test_helper.bash) continue ;;
-    esac
+    [[ "$(basename "$test_file")" == "test_helper.bash" ]] && continue
     label="$(basename "$test_file")"
 
     output="$(bash "$test_file" 2>&1)"
-    status=$?
 
     printf '===== %s =====\n' "$label"
     printf '%s\n' "$output"
 
-    # Extract "N passed, M failed" from the framework summary at the end.
-    pass="$(printf '%s\n' "$output" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)"
-    fail="$(printf '%s\n' "$output" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' | tail -1)"
-    pass="${pass:-0}"
-    fail="${fail:-0}"
+    TEST_FILE_PASS=0
+    TEST_FILE_FAIL=0
+    extract_counts "$output"
 
-    TOTAL_PASS=$(( TOTAL_PASS + pass ))
-    TOTAL_FAIL=$(( TOTAL_FAIL + fail ))
+    TOTAL_PASS=$(( TOTAL_PASS + TEST_FILE_PASS ))
+    TOTAL_FAIL=$(( TOTAL_FAIL + TEST_FILE_FAIL ))
 
-    if [[ "$fail" -gt 0 ]]; then
+    if [[ "$TEST_FILE_FAIL" -gt 0 ]]; then
         FAILED_FILES+=("$label")
     fi
     printf '\n'

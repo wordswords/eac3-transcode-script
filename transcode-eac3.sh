@@ -20,6 +20,8 @@ set -euo pipefail
 readonly AAC_BITRATE_PER_CHANNEL=96k   # bits per channel for the AAC track
 readonly MAX_AAC_CHANNELS=8            # upper bound on compatible-track channels
 readonly DURATION_TOLERANCE_SECONDS=1  # acceptable duration drift for the check
+readonly EAC3_CODEC="eac3"             # ffmpeg codec name for Dolby Digital Plus
+readonly DEFAULT_CHANNEL_COUNT=2       # fallback when a stream omits channel info
 
 # ----------------------------------------------------------------------------
 # Logging
@@ -102,13 +104,18 @@ probe_duration() {
 # E-AC-3 detection
 # ----------------------------------------------------------------------------
 
-# Print the indices of all E-AC-3 ("eac3") audio streams, one per line.
+# Return 0 if the given codec name is E-AC-3.
+is_eac3_codec() {
+    [[ "$1" == "$EAC3_CODEC" ]]
+}
+
+# Print the indices of all E-AC-3 audio streams, one per line.
 find_eac3_stream_indices() {
     local file="$1"
-    local line index codec channels
+    local index codec_name channels
 
-    while IFS=',' read -r index codec channels; do
-        if [[ "$codec" == "eac3" ]]; then
+    while IFS=',' read -r index codec_name channels; do
+        if is_eac3_codec "$codec_name"; then
             log "Found E-AC-3 audio stream: index=$index channels=$channels"
             printf '%s\n' "$index"
         fi
@@ -121,10 +128,10 @@ find_eac3_stream_indices() {
 
 # Compute the AAC channel count, clamped to a supported maximum.
 resolve_channel_count() {
-    local detected_channel_count="${1:-2}"
+    local detected_channel_count="${1:-$DEFAULT_CHANNEL_COUNT}"
     local channel_count="${detected_channel_count%%.*}"
 
-    (( channel_count > 0 )) || channel_count=2
+    (( channel_count > 0 )) || channel_count=$DEFAULT_CHANNEL_COUNT
     (( channel_count > MAX_AAC_CHANNELS )) && channel_count=$MAX_AAC_CHANNELS
 
     printf '%s\n' "$channel_count"
@@ -163,12 +170,12 @@ build_ffmpeg_stream_arguments() {
     done
 
     local output_index=0
-    local line stream_index codec_name stream_type channels channel_count output_bitrate
+    local stream_index codec_name stream_type channels channel_count output_bitrate
 
     while IFS=',' read -r stream_index codec_name stream_type channels; do
         map_args_ref+=("-map" "0:$stream_index")
 
-        if [[ "$stream_type" == "audio" && -n "${eac3_lookup[$stream_index]:-}" ]]; then
+        if is_eac3_audio_stream "$stream_type" "${eac3_lookup[$stream_index]:-}"; then
             append_eac3_copy_args "$codec_args_name" "$output_index"
             (( output_index += 1 ))
 
@@ -183,6 +190,14 @@ build_ffmpeg_stream_arguments() {
             (( output_index += 1 ))
         fi
     done < <(probe_all_streams "$file")
+}
+
+# Return 0 if the stream is an audio stream present in the E-AC-3 lookup.
+is_eac3_audio_stream() {
+    local stream_type="$1"
+    local in_eac3_lookup="$2"
+
+    [[ "$stream_type" == "audio" && -n "$in_eac3_lookup" ]]
 }
 
 # Copy an E-AC-3 stream and clear its default disposition.
@@ -229,33 +244,35 @@ make_temporary_output_path() {
         "$input_dir" "$input_basename" "$$" "$file_extension"
 }
 
+# Print the ffmpeg flags that select hardware-accelerated decode (falling back
+# to software) and max multi-threading, shared by transcode and verification.
+performance_flags() {
+    printf '%s\n' "-hwaccel" "auto" "-threads" "0"
+}
+
 transcode_file() {
     local input_file="$1"
     local output_file="$2"
     local -n map_args_ref="$3"
     local -n codec_args_ref="$4"
+    local -a perf=()
+    mapfile -t perf < <(performance_flags)
 
     # Video and the original E-AC-3 stream are copied bit-for-bit, so the only
-    # encode is audio->AAC. `-hwaccel auto` selects the fastest available video
-    # decoder (falling back to software if none work), `-threads 0` uses all
-    # cores, and `-stats` renders a live progress line (at a reduced log level
-    # so we don't dump the full stream mapping).
+    # encode is audio->AAC. `-stats` renders a live progress line at a reduced
+    # log level so we don't dump the full stream mapping.
     ffmpeg -hide_banner -loglevel warning -y \
-        -hwaccel auto \
+        "${perf[@]}" \
         -i "$input_file" \
         "${map_args_ref[@]}" \
         "${codec_args_ref[@]}" \
         -map_metadata 0 \
         -map_chapters 0 \
         -movflags +faststart \
-        -stats -threads 0 \
+        -stats \
         -- "$output_file" 2>&1 \
         || die "ffmpeg transcoding failed"
 }
-
-# ----------------------------------------------------------------------------
-# Integrity verification
-# ----------------------------------------------------------------------------
 
 # ----------------------------------------------------------------------------
 # Integrity verification
@@ -268,14 +285,15 @@ transcode_file() {
 verify_decode_clean() {
     local output_file="$1"
     local stderr_log
+    local -a perf=()
     stderr_log="$(mktemp)"
+    mapfile -t perf < <(performance_flags)
 
     # `-progress pipe:1` emits a machine-readable progress meter on stdout,
     # while `-v error` keeps stderr limited to genuine errors/warnings.
     ffmpeg -hide_banner -v error \
-        -hwaccel auto \
+        "${perf[@]}" \
         -i "$output_file" \
-        -threads 0 \
         -f null - \
         -progress pipe:1 \
         2>"$stderr_log" || true
@@ -360,6 +378,32 @@ clean_up() {
     fi
 }
 
+# Transcode <input_file> into a temporary file, verify it, and replace the
+# original in place. On failure or interruption the temp file is cleaned up.
+# <map_args_name> and <codec_args_name> are the names of caller-owned arrays.
+transcode_and_replace() {
+    local input_file="$1"
+    local map_args_name="$2"
+    local codec_args_name="$3"
+    local temp_file
+
+    temp_file="$(make_temporary_output_path "$input_file")"
+    log "Temporary output: $temp_file"
+
+    # Guarantee cleanup of the temp file on failure or interruption.
+    trap 'clean_up "$temp_file"' EXIT INT TERM
+
+    transcode_file "$input_file" "$temp_file" "$map_args_name" "$codec_args_name"
+    log "Transcode completed successfully."
+
+    verify_integrity "$input_file" "$temp_file"
+
+    replace_original_in_place "$temp_file" "$input_file"
+
+    # Temp file has been consumed; disarm cleanup.
+    trap - EXIT INT TERM
+}
+
 main() {
     require_dependencies
 
@@ -380,25 +424,9 @@ main() {
     local codec_args=()
     build_ffmpeg_stream_arguments "$input_file" map_args codec_args
 
-    local temp_file
-    temp_file="$(make_temporary_output_path "$input_file")"
-    log "Temporary output: $temp_file"
+    transcode_and_replace "$input_file" map_args codec_args
 
-    # Guarantee cleanup of the temp file on failure or interruption.
-    trap 'clean_up "$temp_file"' EXIT INT TERM
-
-    transcode_file "$input_file" "$temp_file" map_args codec_args
-    log "Transcode completed successfully."
-
-    verify_integrity "$input_file" "$temp_file"
-
-    replace_original_in_place "$temp_file" "$input_file"
-    local replaced_file="$input_file"   # capture before temp_file goes away
-
-    # Temp file has been consumed; disarm cleanup.
-    trap - EXIT INT TERM
-
-    log "Operation complete: $replaced_file"
+    log "Operation complete: $input_file"
 }
 
 # Only run when executed directly, not when sourced (e.g. by the test suite).

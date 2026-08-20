@@ -20,6 +20,10 @@ set -euo pipefail
 readonly SCREEN_SESSION="eac3-conversion-screen"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly TRANSCODE_SCRIPT="${SCRIPT_DIR}/transcode-eac3.sh"
+readonly EAC3_CODEC="eac3"           # ffmpeg codec name for Dolby Digital Plus
+readonly WORKER_FILENAME=".eac3-batch-worker.sh"
+readonly MANIFEST_FILENAME=".eac3-batch-manifest"
+readonly SUMMARY_LOG_FILENAME="eac3-conversion.log"
 
 # ----------------------------------------------------------------------------
 # Logging
@@ -53,16 +57,20 @@ require_directory() {
 }
 
 require_dependencies() {
-    command -v screen >/dev/null 2>&1 \
-        || die "screen is not installed or not on the PATH"
-    command -v ffprobe >/dev/null 2>&1 \
-        || die "ffprobe is not installed or not on the PATH"
-    command -v ffmpeg >/dev/null 2>&1 \
-        || die "ffmpeg is not installed or not on the PATH"
+    require_command screen
+    require_command ffprobe
+    require_command ffmpeg
 
     if [[ ! -x "$TRANSCODE_SCRIPT" ]]; then
         die "transcode script not found or not executable: $TRANSCODE_SCRIPT"
     fi
+}
+
+# Ensure a command is available on the PATH.
+require_command() {
+    local command_name="$1"
+    command -v "$command_name" >/dev/null 2>&1 \
+        || die "$command_name is not installed or not on the PATH"
 }
 
 # ----------------------------------------------------------------------------
@@ -79,7 +87,7 @@ has_eac3_audio() {
         -of default=noprint_wrappers=1:nokey=1 \
         -- "$file" 2>/dev/null \
         | tr -d '\r' \
-        | grep -qx 'eac3'
+        | grep -qx "$EAC3_CODEC"
 }
 
 # Write the NUL-delimited list of E-AC-3 files to <output_file>.
@@ -105,12 +113,12 @@ build_eac3_manifest() {
 # Print the path to the worker script and manifest.
 make_worker_path() {
     local directory="$1"
-    printf '%s/.eac3-batch-worker.sh\n' "$directory"
+    printf '%s/%s\n' "$directory" "$WORKER_FILENAME"
 }
 
 make_manifest_path() {
     local directory="$1"
-    printf '%s/.eac3-batch-manifest\n' "$directory"
+    printf '%s/%s\n' "$directory" "$MANIFEST_FILENAME"
 }
 
 # Write the worker script. It reads the manifest and transcodes each file,
@@ -177,7 +185,7 @@ main() {
 
     worker_path="$(make_worker_path "$directory")"
     manifest_path="$(make_manifest_path "$directory")"
-    summary_log="${directory}/eac3-conversion.log"
+    summary_log="${directory}/${SUMMARY_LOG_FILENAME}"
 
     log "Scanning for E-AC-3 files under: $directory"
     build_eac3_manifest "$directory" "$manifest_path"
