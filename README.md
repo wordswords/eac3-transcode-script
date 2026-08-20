@@ -7,7 +7,9 @@ E-AC-3 stream the script adds:
 - an **AAC** track (set as the default), and
 - a separate **5.1 AC-3** track.
 
-Integrity is verified before replacing the original file in place.
+Integrity is verified before replacing the original file in place. Finally, the
+script removes accidental duplicate audio streams (collapsing streams that share
+codec, channel count, language, and encoded content).
 
 Supported containers: MKV and MP4.
 
@@ -66,6 +68,7 @@ fixtures on the fly.
 | `tests/test_detection.bash` | E-AC-3 stream detection against real media |
 | `tests/test_arguments.bash` | ffmpeg `-map`/`-c`/`-disposition` argument construction |
 | `tests/test_integrity.bash` | Decode verification, duration comparison, file replacement, cleanup |
+| `tests/test_deduplicate.bash` | Audio-stream deduplication (codec + channels + language + checksum) |
 | `tests/test_main.bash` | Full end-to-end transcodes with real ffmpeg/ffprobe (MKV) |
 | `tests/test_mp4.bash` | End-to-end transcodes confirming MP4 behaves like MKV |
 | `tests/test_directory.bash` | Directory batch script: detection, manifest, worker generation |

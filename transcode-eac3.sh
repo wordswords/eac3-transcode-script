@@ -103,6 +103,20 @@ probe_duration() {
         | tr -d '\r'
 }
 
+# Emit audio streams as "index,codec_name,channels,language" lines. Carriage
+# returns are stripped for cross-platform consistency; an empty language field
+# is emitted as an empty string so columns stay aligned.
+probe_audio_stream_metadata() {
+    local file="$1"
+    ffprobe -v error \
+        -select_streams a \
+        -show_entries stream=index,codec_name,channels \
+        -show_entries stream_tags=language \
+        -of csv=p=0 \
+        -- "$file" 2>/dev/null \
+        | tr -d '\r'
+}
+
 # ----------------------------------------------------------------------------
 # E-AC-3 detection
 # ----------------------------------------------------------------------------
@@ -271,6 +285,20 @@ make_temporary_output_path() {
         "$input_dir" "$input_basename" "$$" "$file_extension"
 }
 
+# Build a second temporary path (for the deduplication pass) alongside the
+# source file, distinct from the transcode temp so the two never collide.
+make_dedup_output_path() {
+    local input_file="$1"
+    local input_dir input_basename file_extension
+
+    input_dir="$(dirname -- "$input_file")"
+    input_basename="$(basename -- "$input_file")"
+    file_extension="${input_basename##*.}"
+
+    printf '%s/.%s.dedup.%s.%s\n' \
+        "$input_dir" "$input_basename" "$$" "$file_extension"
+}
+
 transcode_file() {
     local input_file="$1"
     local output_file="$2"
@@ -365,6 +393,99 @@ verify_integrity() {
 }
 
 # ----------------------------------------------------------------------------
+# Audio stream deduplication
+# ----------------------------------------------------------------------------
+
+# Print the MD5 checksum (as "MD5=<hex>") of a single audio stream's encoded
+# packets. <audio_index> is 0-based relative to the audio streams.
+checksum_audio_stream() {
+    local file="$1"
+    local audio_index="$2"
+    ffmpeg -hide_banner -v error \
+        -i "$file" \
+        -map "0:a:${audio_index}" \
+        -c copy \
+        -f md5 - 2>&1 \
+        | grep -oE 'MD5=[0-9a-fA-F]+' \
+        | head -1
+}
+
+# Print the absolute stream index of every audio stream that duplicates an
+# earlier stream, as "<index>" lines. Two streams are duplicates when their
+# codec, channel count, language, and encoded-packet checksum all match.
+find_duplicate_audio_indices() {
+    local file="$1"
+    local -A seen=()
+    local audio_relative=0
+    local index codec_name channels language dedup_key checksum
+
+    while IFS=',' read -r index codec_name channels language; do
+        checksum="$(checksum_audio_stream "$file" "$audio_relative")"
+        dedup_key="${codec_name}|${channels}|${language}|${checksum}"
+
+        if [[ -n "${seen[$dedup_key]:-}" ]]; then
+            printf '%s\n' "$index"
+        else
+            seen[$dedup_key]=1
+        fi
+
+        audio_relative=$(( audio_relative + 1 ))
+    done < <(probe_audio_stream_metadata "$file")
+}
+
+# Remove any duplicate audio streams from <file>, producing a new file in
+# place. Only runs when duplicates are found; otherwise leaves the file
+# untouched. Video, subtitles, chapters, and metadata are preserved by copying
+# every non-duplicate stream.
+deduplicate_audio_streams() {
+    local file="$1"
+    local -a duplicate_indices=()
+    mapfile -t duplicate_indices < <(find_duplicate_audio_indices "$file")
+
+    if [[ ${#duplicate_indices[@]} -eq 0 ]]; then
+        log "No duplicate audio streams found."
+        return 0
+    fi
+
+    log "Removing ${#duplicate_indices[@]} duplicate audio stream(s)."
+
+    # Build a lookup so we can skip duplicate streams when mapping.
+    local -A drop_lookup=()
+    local dup
+    for dup in "${duplicate_indices[@]}"; do
+        drop_lookup[$dup]=1
+    done
+
+    # Map every stream except the duplicates; copy them all bit-for-bit.
+    local -a map_args=()
+    local output_stream_index=0
+    local stream_index
+    while IFS=',' read -r stream_index _rest; do
+        if [[ -n "${drop_lookup[$stream_index]:-}" ]]; then
+            continue
+        fi
+        map_args+=("-map" "0:$stream_index")
+        map_args+=("-c:$output_stream_index" "copy")
+        output_stream_index=$(( output_stream_index + 1 ))
+    done < <(probe_all_streams "$file")
+
+    local deduped
+    deduped="$(make_dedup_output_path "$file")"
+
+    ffmpeg -hide_banner -loglevel warning -y \
+        -i "$file" \
+        "${map_args[@]}" \
+        -map_metadata 0 \
+        -map_chapters 0 \
+        -movflags +faststart \
+        -- "$deduped" 2>&1 \
+        || die "ffmpeg deduplication failed"
+
+    mv -f -- "$deduped" "$file"
+    log "Deduplication complete."
+}
+
+# ----------------------------------------------------------------------------
 # File replacement
 # ----------------------------------------------------------------------------
 
@@ -418,6 +539,8 @@ transcode_and_replace() {
     log "Transcode completed successfully."
 
     verify_integrity "$input_file" "$temp_file"
+
+    deduplicate_audio_streams "$temp_file"
 
     replace_original_in_place "$temp_file" "$input_file"
 
