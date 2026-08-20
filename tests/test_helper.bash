@@ -21,6 +21,9 @@ TEST_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Path to the script under test.
 SCRIPT_UNDER_TEST="${TEST_ROOT_DIR}/../transcode-eac3.sh"
 
+# Path to the directory-batch script.
+SCRIPT_UNDER_TEST_DIR="${TEST_ROOT_DIR}/../transcode-directory.sh"
+
 # A writable scratch directory for the current run.
 TEMP_DIR="$(mktemp -d)"
 export TEMP_DIR
