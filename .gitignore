@@ -1,0 +1,6 @@
+# Temporary transcoding output
+.*.transcoding.*
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
