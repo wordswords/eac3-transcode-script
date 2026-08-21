@@ -71,6 +71,33 @@ assert_contains "$ac3_layout" "ac3,6" "AC-3 stream is 5.1 (6 channels)"
 assert_contains "$ac3_layout" "5.1" "AC-3 stream uses a surround layout"
 
 # ---------------------------------------------------------------------------
+# Case 2c: multi-language E-AC-3 -> each language gets AAC+AC-3, English is default
+# ---------------------------------------------------------------------------
+
+begin_test "multi-language E-AC-3 produces AAC+AC-3 per language, English default"
+make_multilang_eac3_media_file "$TEMP_DIR/multi.mkv"
+
+(
+    main "$TEMP_DIR/multi.mkv"
+)
+assert_status 0 "$?" "main exit status"
+
+# Probe audio streams as: index,codec_name,channels,default,language.
+meta="$(ffprobe -v error -select_streams a \
+    -show_entries stream=index,codec_name,channels \
+    -show_entries stream_tags=language \
+    -show_entries stream_disposition=default \
+    -of csv=p=0 -- "$TEMP_DIR/multi.mkv" | tr -d '\r')"
+
+assert_contains "$meta" "aac" "AAC streams generated"
+assert_contains "$meta" "ac3" "AC-3 streams generated"
+
+# The default stream must be AAC and tagged English.
+default_line="$(printf '%s\n' "$meta" | awk -F, '$4 == 1 { print }')"
+assert_contains "$default_line" "aac" "default track is AAC"
+assert_contains "$default_line" "eng" "default track is English"
+
+# ---------------------------------------------------------------------------
 # Case 3: temporary transcoding artifact is cleaned up
 # ---------------------------------------------------------------------------
 

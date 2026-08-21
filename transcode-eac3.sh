@@ -169,8 +169,9 @@ resolve_bitrate() {
 
 # Given the set of E-AC-3 indices, build the -map and per-stream -c/-disposition
 # arguments needed to copy every stream and, per E-AC-3 stream, add an AAC track
-# (the default) plus a separate 5.1 AC-3 compatibility track. Results are stored
-# in the caller-provided array names.
+# plus a separate 5.1 AC-3 compatibility track. The AAC companion of the English
+# audio stream (falling back to the first E-AC-3 stream) is marked default.
+# Results are stored in the caller-provided array names.
 build_ffmpeg_stream_arguments() {
     local file="$1"
     local map_args_name="$2"
@@ -187,8 +188,15 @@ build_ffmpeg_stream_arguments() {
         eac3_lookup[$index]=1
     done
 
+    local default_source_index
+    default_source_index="$(find_english_audio_index "$file")"
+    if [[ -z "$default_source_index" ]]; then
+        # Fall back to the first E-AC-3 stream when no English audio exists.
+        default_source_index="${eac3_indices[0]:-}"
+    fi
+
     local output_index=0
-    local stream_index codec_name stream_type channels channel_count output_bitrate
+    local stream_index codec_name stream_type channels channel_count output_bitrate is_default
 
     while IFS=',' read -r stream_index codec_name stream_type channels; do
         map_args_ref+=("-map" "0:$stream_index")
@@ -200,9 +208,15 @@ build_ffmpeg_stream_arguments() {
             channel_count="$(resolve_channel_count "$channels")"
             output_bitrate="$(resolve_bitrate "$channel_count")"
 
-            # AAC compatibility track (the default one).
+            if [[ "$stream_index" == "$default_source_index" ]]; then
+                is_default=1
+            else
+                is_default=0
+            fi
+
+            # AAC compatibility track.
             map_args_ref+=("-map" "0:$stream_index")
-            append_compat_aac "$codec_args_name" "$output_index" "$channel_count" "$output_bitrate"
+            append_compat_aac "$codec_args_name" "$output_index" "$channel_count" "$output_bitrate" "$is_default"
             (( output_index += 1 ))
 
             # Separate 5.1 AC-3 compatibility track.
@@ -214,6 +228,20 @@ build_ffmpeg_stream_arguments() {
             (( output_index += 1 ))
         fi
     done < <(probe_all_streams "$file")
+}
+
+# Print the absolute index of the audio stream tagged with language "eng", or
+# nothing if none is tagged as English.
+find_english_audio_index() {
+    local file="$1"
+    local index codec_name channels language
+
+    while IFS=',' read -r index codec_name channels language; do
+        if [[ "$language" == "eng" ]]; then
+            printf '%s\n' "$index"
+            return 0
+        fi
+    done < <(probe_audio_stream_metadata "$file")
 }
 
 # Return 0 if the stream is an audio stream present in the E-AC-3 lookup.
@@ -235,19 +263,28 @@ append_copied_eac3() {
     )
 }
 
-# Encode an AAC stream and mark it as the default track.
+# Encode an AAC stream. <is_default> is 1 for the single track that should be
+# the default, 0 otherwise.
 append_compat_aac() {
     local -n target_array="$1"
     local output_index="$2"
     local channel_count="$3"
     local output_bitrate="$4"
+    local is_default="$5"
+    local disposition
+
+    if [[ "$is_default" == "1" ]]; then
+        disposition="default"
+    else
+        disposition="0"
+    fi
 
     target_array+=(
         "-c:$output_index" "aac"
         "-b:$output_index" "$output_bitrate"
         "-ac:$output_index" "$channel_count"
         "-metadata:s:$output_index" "title=Compatible AAC"
-        "-disposition:$output_index" "default"
+        "-disposition:$output_index" "$disposition"
     )
 }
 

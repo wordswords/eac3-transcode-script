@@ -4,8 +4,13 @@ Detect media files containing E-AC-3 audio and add Windows 11 / Plex
 compatible audio tracks while preserving the original E-AC-3 stream. For each
 E-AC-3 stream the script adds:
 
-- an **AAC** track (set as the default), and
+- an **AAC** track, and
 - a separate **5.1 AC-3** track.
+
+When a file has multiple E-AC-3 streams (e.g. multiple audio languages), each
+stream gets its own AAC + AC-3 pair. The **English** AAC track is marked
+default; if no English track is present, the first E-AC-3 stream's AAC track is
+used as the default.
 
 Integrity is verified before replacing the original file in place. Finally, the
 script removes accidental duplicate audio streams (collapsing streams that share

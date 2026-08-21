@@ -221,6 +221,23 @@ make_channel_distinct_aac_media_file() {
     printf '%s' "$path"
 }
 
+# Generate a 1-second MKV with three E-AC-3 streams tagged eng / ita / jpn, to
+# exercise multi-language defaulting and per-stream AAC+AC-3 generation.
+make_multilang_eac3_media_file() {
+    local path="$1"
+    mkdir -p "$(dirname "$path")"
+    "$REAL_FFMPEG" -hide_banner -loglevel error -y \
+        -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
+        -f lavfi -i "sine=frequency=1000:duration=1" \
+        -f lavfi -i "sine=frequency=2000:duration=1" \
+        -f lavfi -i "sine=frequency=3000:duration=1" \
+        -map 0:v -map 1:a -map 2:a -map 3:a \
+        -c:v libx264 -c:a eac3 \
+        -metadata:s:a:0 language=ita -metadata:s:a:1 language=jpn -metadata:s:a:2 language=eng \
+        -shortest "$path" 2>&1
+    printf '%s' "$path"
+}
+
 # ----------------------------------------------------------------------------
 # Fake toolchain (for failure-branch tests)
 # ----------------------------------------------------------------------------
