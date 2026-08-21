@@ -1,8 +1,9 @@
 # eac3-transcode-script
 
 Detect media files containing E-AC-3 audio and add Windows 11 / Plex
-compatible audio tracks while preserving the original E-AC-3 stream. For each
-E-AC-3 stream the script adds:
+compatible audio tracks - in AAC - and Logitech Z906 DTS 5.1 surround 
+sound system compatiable tracks - in 5.1 AC-3 - while preserving the 
+original E-AC-3 stream. For each E-AC-3 stream the script adds:
 
 - an **AAC** track, and
 - a separate **5.1 AC-3** track.
