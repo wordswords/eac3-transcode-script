@@ -310,6 +310,7 @@ transcode_file() {
     # live progress line at a reduced log level so we don't dump the full
     # stream mapping.
     ffmpeg -hide_banner -loglevel warning -y \
+        -nostdin \
         -threads 0 \
         -i "$input_file" \
         "${map_args_ref[@]}" \
@@ -341,6 +342,7 @@ verify_decode_clean() {
     # while stderr is captured separately so we can inspect it on failure.
     ffmpeg_status=0
     ffmpeg -hide_banner -v error \
+        -nostdin \
         -threads 0 \
         -i "$output_file" \
         -f null - \
@@ -402,6 +404,7 @@ checksum_audio_stream() {
     local file="$1"
     local audio_index="$2"
     ffmpeg -hide_banner -v error \
+        -nostdin \
         -i "$file" \
         -map "0:a:${audio_index}" \
         -c copy \
@@ -473,6 +476,7 @@ deduplicate_audio_streams() {
     deduped="$(make_dedup_output_path "$file")"
 
     ffmpeg -hide_banner -loglevel warning -y \
+        -nostdin \
         -i "$file" \
         "${map_args[@]}" \
         -map_metadata 0 \

@@ -207,11 +207,13 @@ main() {
         log "screen session '$SCREEN_SESSION' already exists"
     else
         log "Starting detached screen session '$SCREEN_SESSION'"
-        screen -dmS "$SCREEN_SESSION" bash "$worker_path"
+        # Run the worker detached with its stdin disconnected from the terminal
+        # so ffmpeg (and screen) never read stray keystrokes.
+        screen -dmS "$SCREEN_SESSION" bash "$worker_path" < /dev/null
     fi
 
     log "Attaching to screen session '$SCREEN_SESSION' (detach with Ctrl-A, D)."
-    screen -r "$SCREEN_SESSION"
+    screen -R "$SCREEN_SESSION"
 }
 
 # Only run when executed directly, not when sourced (e.g. by the test suite).
