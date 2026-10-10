@@ -136,6 +136,11 @@ resolve_real_tool() {
 REAL_FFPROBE="$(resolve_real_tool ffprobe)"
 REAL_FFMPEG="$(resolve_real_tool ffmpeg)"
 
+# Keep generated fixtures portable across minimal ffmpeg builds. Some CI/system
+# ffmpeg packages omit libx264, while the native MPEG-4 Part 2 encoder is broadly
+# available and works in both MKV and MP4 containers for these tests.
+TEST_VIDEO_CODEC="${TEST_VIDEO_CODEC:-mpeg4}"
+
 have_real_tools() {
     [[ -n "$REAL_FFPROBE" && -n "$REAL_FFMPEG" ]]
 }
@@ -153,7 +158,7 @@ make_media_file() {
     "$REAL_FFMPEG" -hide_banner -loglevel error -y \
         -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
         -f lavfi -i "sine=frequency=1000:duration=1" \
-        -c:v libx264 -c:a "$audio_codec" -shortest "$path" 2>&1
+        -c:v "$TEST_VIDEO_CODEC" -c:a "$audio_codec" -shortest "$path" 2>&1
     printf '%s' "$path"
 }
 
@@ -163,6 +168,18 @@ make_aac_media_file()  { make_media_file "$1" aac; }
 make_eac3_mp4_file()   { make_media_file "$1" eac3; }
 make_aac_mp4_file()    { make_media_file "$1" aac; }
 
+# Generate a 1-second MKV whose single audio stream is Dolby TrueHD 7.1, which
+# is how ffprobe exposes many Dolby Atmos 7.1 sources.
+make_truehd_71_media_file() {
+    local path="$1"
+    mkdir -p "$(dirname "$path")"
+    "$REAL_FFMPEG" -hide_banner -loglevel error -y \
+        -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
+        -f lavfi -i "anullsrc=channel_layout=7.1:sample_rate=48000:d=1" \
+        -c:v "$TEST_VIDEO_CODEC" -c:a truehd -strict -2 -shortest "$path" 2>&1
+    printf '%s' "$path"
+}
+
 # Generate a 1-second MKV whose single E-AC-3 stream is 5.1 surround.
 make_eac3_51_media_file() {
     local path="$1"
@@ -171,7 +188,7 @@ make_eac3_51_media_file() {
         -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
         -f lavfi -i "sine=frequency=1000:duration=1:sample_rate=48000" \
         -af "aformat=channel_layouts=5.1" \
-        -c:v libx264 -c:a eac3 -shortest "$path" 2>&1
+        -c:v "$TEST_VIDEO_CODEC" -c:a eac3 -shortest "$path" 2>&1
     printf '%s' "$path"
 }
 
@@ -184,7 +201,7 @@ make_duplicate_aac_media_file() {
         -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
         -f lavfi -i "sine=frequency=1000:duration=1" \
         -map 0:v -map 1:a -map 1:a \
-        -c:v libx264 -c:a aac \
+        -c:v "$TEST_VIDEO_CODEC" -c:a aac \
         -metadata:s:a:0 language=eng -metadata:s:a:1 language=eng \
         -shortest "$path" 2>&1
     printf '%s' "$path"
@@ -198,7 +215,7 @@ make_language_distinct_aac_media_file() {
         -f lavfi -i "testsrc2=size=64x64:rate=10:duration=1" \
         -f lavfi -i "sine=frequency=1000:duration=1" \
         -map 0:v -map 1:a -map 1:a \
-        -c:v libx264 -c:a aac \
+        -c:v "$TEST_VIDEO_CODEC" -c:a aac \
         -metadata:s:a:0 language=eng -metadata:s:a:1 language=spa \
         -shortest "$path" 2>&1
     printf '%s' "$path"
@@ -215,7 +232,7 @@ make_channel_distinct_aac_media_file() {
         -f lavfi -i "sine=frequency=1000:duration=1:sample_rate=48000" \
         -filter_complex "[1:a]aformat=channel_layouts=stereo[s0];[2:a]aformat=channel_layouts=5.1[s1]" \
         -map 0:v -map "[s0]" -map "[s1]" \
-        -c:v libx264 -c:a aac \
+        -c:v "$TEST_VIDEO_CODEC" -c:a aac \
         -metadata:s:a:0 language=eng -metadata:s:a:1 language=eng \
         -shortest "$path" 2>&1
     printf '%s' "$path"
@@ -232,7 +249,7 @@ make_multilang_eac3_media_file() {
         -f lavfi -i "sine=frequency=2000:duration=1" \
         -f lavfi -i "sine=frequency=3000:duration=1" \
         -map 0:v -map 1:a -map 2:a -map 3:a \
-        -c:v libx264 -c:a eac3 \
+        -c:v "$TEST_VIDEO_CODEC" -c:a eac3 \
         -metadata:s:a:0 language=ita -metadata:s:a:1 language=jpn -metadata:s:a:2 language=eng \
         -shortest "$path" 2>&1
     printf '%s' "$path"

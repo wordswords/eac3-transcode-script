@@ -2,11 +2,11 @@
 #
 # transcode-eac3.sh
 #
-# Detect whether a media file contains E-AC-3 audio. If it does, add an AAC
-# track (broadly compatible with Windows 11 and Plex) as the default audio
-# track, while preserving the original E-AC-3 stream. After transcoding, the
-# new file's integrity is verified. If it passes, the original file is
-# replaced in place (retaining the original filename).
+# Detect whether a media file contains E-AC-3 audio or Dolby TrueHD/Atmos audio.
+# If it does, add AAC and AC-3 tracks (broadly compatible with Windows 11 and
+# Plex), while preserving the original stream. After transcoding, the new file's
+# integrity is verified. If it passes, the original
+# file is replaced in place (retaining the original filename).
 #
 # Usage:
 #   ./transcode-eac3.sh /path/to/media/file.mkv
@@ -21,6 +21,7 @@ readonly AAC_BITRATE_PER_CHANNEL=96k   # bits per channel for the AAC track
 readonly MAX_AAC_CHANNELS=8            # upper bound on compatible-track channels
 readonly DURATION_TOLERANCE_SECONDS=1  # acceptable duration drift for the check
 readonly EAC3_CODEC="eac3"             # ffmpeg codec name for Dolby Digital Plus
+readonly TRUEHD_CODEC="truehd"         # ffmpeg codec name for Dolby TrueHD / Atmos
 readonly DEFAULT_CHANNEL_COUNT=2       # fallback when a stream omits channel info
 readonly AC3_BITRATE="640k"            # bitrate for the 5.1 AC-3 compatibility track
 readonly AC3_CHANNEL_COUNT=6           # 5.1 surround = 6 channels
@@ -118,25 +119,40 @@ probe_audio_stream_metadata() {
 }
 
 # ----------------------------------------------------------------------------
-# E-AC-3 detection
+# E-AC-3 / Dolby TrueHD-Atmos detection
 # ----------------------------------------------------------------------------
 
-# Return 0 if the given codec name is E-AC-3.
-is_eac3_codec() {
-    [[ "$1" == "$EAC3_CODEC" ]]
+# Return 0 if the given codec name is one that should get AAC/AC-3 fallbacks.
+is_fallback_source_codec() {
+    case "$1" in
+        "$EAC3_CODEC"|"$TRUEHD_CODEC") return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
-# Print the indices of all E-AC-3 audio streams, one per line.
-find_eac3_stream_indices() {
+# Backwards-compatible name retained for tests/older callers. This now returns
+# true for every source codec that needs compatibility fallbacks.
+is_eac3_codec() {
+    is_fallback_source_codec "$1"
+}
+
+# Print the indices of all audio streams that need AAC/AC-3 fallbacks, one per
+# line. That includes E-AC-3 and Dolby TrueHD/Atmos streams.
+find_fallback_source_stream_indices() {
     local file="$1"
     local index codec_name channels
 
     while IFS=',' read -r index codec_name channels; do
-        if is_eac3_codec "$codec_name"; then
-            log "Found E-AC-3 audio stream: index=$index channels=$channels"
+        if is_fallback_source_codec "$codec_name"; then
+            log "Found fallback-source audio stream: index=$index codec=$codec_name channels=$channels"
             printf '%s\n' "$index"
         fi
     done < <(probe_audio_streams "$file")
+}
+
+# Backwards-compatible name retained for tests/older callers.
+find_eac3_stream_indices() {
+    find_fallback_source_stream_indices "$1"
 }
 
 # ----------------------------------------------------------------------------
@@ -167,10 +183,11 @@ resolve_bitrate() {
 # ffmpeg argument construction
 # ----------------------------------------------------------------------------
 
-# Given the set of E-AC-3 indices, build the -map and per-stream -c/-disposition
-# arguments needed to copy every stream and, per E-AC-3 stream, add an AAC track
-# plus a separate 5.1 AC-3 compatibility track. The AAC companion of the English
-# audio stream (falling back to the first E-AC-3 stream) is marked default.
+# Given the set of fallback-source indices, build the -map and per-stream
+# -c/-disposition arguments needed to copy every stream and, per E-AC-3 or
+# Dolby TrueHD/Atmos stream, add an AAC track plus a separate 5.1 AC-3
+# compatibility track. The AAC companion of the English audio stream (falling
+# back to the first fallback-source stream) is marked default.
 # Results are stored in the caller-provided array names.
 build_ffmpeg_stream_arguments() {
     local file="$1"
@@ -179,20 +196,20 @@ build_ffmpeg_stream_arguments() {
     local -n map_args_ref="$map_args_name"
     local -n codec_args_ref="$codec_args_name"
 
-    local eac3_indices=()
-    mapfile -t eac3_indices < <(find_eac3_stream_indices "$file")
+    local source_indices=()
+    mapfile -t source_indices < <(find_fallback_source_stream_indices "$file")
 
-    local -A eac3_lookup=()
+    local -A source_lookup=()
     local index
-    for index in "${eac3_indices[@]}"; do
-        eac3_lookup[$index]=1
+    for index in "${source_indices[@]}"; do
+        source_lookup[$index]=1
     done
 
     local default_source_index
     default_source_index="$(find_english_audio_index "$file")"
     if [[ -z "$default_source_index" ]]; then
-        # Fall back to the first E-AC-3 stream when no English audio exists.
-        default_source_index="${eac3_indices[0]:-}"
+        # Fall back to the first fallback-source stream when no English audio exists.
+        default_source_index="${source_indices[0]:-}"
     fi
 
     local output_index=0
@@ -201,8 +218,8 @@ build_ffmpeg_stream_arguments() {
     while IFS=',' read -r stream_index codec_name stream_type channels; do
         map_args_ref+=("-map" "0:$stream_index")
 
-        if is_eac3_audio_stream "$stream_type" "${eac3_lookup[$stream_index]:-}"; then
-            append_copied_eac3 "$codec_args_name" "$output_index"
+        if is_fallback_source_audio_stream "$stream_type" "${source_lookup[$stream_index]:-}"; then
+            append_copied_source_audio "$codec_args_name" "$output_index"
             (( output_index += 1 ))
 
             channel_count="$(resolve_channel_count "$channels")"
@@ -244,16 +261,21 @@ find_english_audio_index() {
     done < <(probe_audio_stream_metadata "$file")
 }
 
-# Return 0 if the stream is an audio stream present in the E-AC-3 lookup.
-is_eac3_audio_stream() {
+# Return 0 if the stream is an audio stream present in the fallback-source lookup.
+is_fallback_source_audio_stream() {
     local stream_type="$1"
-    local in_eac3_lookup="$2"
+    local in_source_lookup="$2"
 
-    [[ "$stream_type" == "audio" && -n "$in_eac3_lookup" ]]
+    [[ "$stream_type" == "audio" && -n "$in_source_lookup" ]]
 }
 
-# Copy an E-AC-3 stream and clear its default disposition.
-append_copied_eac3() {
+# Backwards-compatible name retained for tests/older callers.
+is_eac3_audio_stream() {
+    is_fallback_source_audio_stream "$1" "$2"
+}
+
+# Copy an original fallback-source stream and clear its default disposition.
+append_copied_source_audio() {
     local -n target_array="$1"
     local output_index="$2"
 
@@ -261,6 +283,11 @@ append_copied_eac3() {
         "-c:$output_index" "copy"
         "-disposition:$output_index" "0"
     )
+}
+
+# Backwards-compatible name retained for tests/older callers.
+append_copied_eac3() {
+    append_copied_source_audio "$1" "$2"
 }
 
 # Encode an AAC stream. <is_default> is 1 for the single track that should be
@@ -342,9 +369,9 @@ transcode_file() {
     local -n map_args_ref="$3"
     local -n codec_args_ref="$4"
 
-    # Video and the original E-AC-3 stream are copied bit-for-bit, so the only
-    # encode is audio->AAC. `-threads 0` uses all cores, and `-stats` renders a
-    # live progress line at a reduced log level so we don't dump the full
+    # Video and the original fallback-source stream are copied bit-for-bit, so
+    # the only encodes are the AAC/AC-3 compatibility tracks. `-threads 0` uses
+    # all cores, and `-stats` renders a live progress line at a reduced log level
     # stream mapping.
     ffmpeg -hide_banner -loglevel warning -y \
         -nostdin \
@@ -596,14 +623,14 @@ main() {
     input_file="$(resolve_input_file "$@")"
     log "Processing: $input_file"
 
-    local eac3_stream_count
-    eac3_stream_count="$(find_eac3_stream_indices "$input_file" | wc -l)"
+    local fallback_stream_count
+    fallback_stream_count="$(find_fallback_source_stream_indices "$input_file" | wc -l)"
 
-    if (( eac3_stream_count == 0 )); then
-        log "No E-AC-3 audio streams detected. Nothing to do: $input_file"
+    if (( fallback_stream_count == 0 )); then
+        log "No E-AC-3 or Dolby TrueHD/Atmos audio streams detected. Nothing to do: $input_file"
         return 0
     fi
-    log "Found $eac3_stream_count E-AC-3 stream(s); adding a default AAC track."
+    log "Found $fallback_stream_count E-AC-3/Dolby TrueHD-Atmos stream(s); adding AAC and AC-3 fallback tracks."
 
     local map_args=()
     local codec_args=()

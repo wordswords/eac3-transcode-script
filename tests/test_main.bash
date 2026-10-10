@@ -98,6 +98,34 @@ assert_contains "$default_line" "aac" "default track is AAC"
 assert_contains "$default_line" "eng" "default track is English"
 
 # ---------------------------------------------------------------------------
+# Case 2d: Dolby TrueHD/Atmos -> transcoded in place with AAC + AC-3 fallbacks
+# ---------------------------------------------------------------------------
+
+begin_test "main transcodes Dolby TrueHD/Atmos in place, adding AAC and AC-3 streams"
+make_truehd_71_media_file "$TEMP_DIR/atmos.mkv"
+
+(
+    main "$TEMP_DIR/atmos.mkv"
+)
+assert_status 0 "$?" "main exit status"
+
+atmos_audio_info="$("$REAL_FFPROBE" -v error \
+    -select_streams a \
+    -show_entries stream=index,codec_name,channels \
+    -show_entries stream_disposition=default \
+    -of csv=p=0 \
+    "$TEMP_DIR/atmos.mkv" | tr -d '\r')"
+assert_contains "$atmos_audio_info" "truehd" "TrueHD/Atmos stream preserved"
+assert_contains "$atmos_audio_info" "aac" "AAC companion added"
+assert_contains "$atmos_audio_info" "ac3" "AC-3 companion added"
+
+atmos_default_codec="$(
+    printf '%s\n' "$atmos_audio_info" \
+        | awk -F, '$4 == 1 { print $2; exit }'
+)"
+assert_equal "aac" "$atmos_default_codec" "default track is AAC"
+
+# ---------------------------------------------------------------------------
 # Case 3: temporary transcoding artifact is cleaned up
 # ---------------------------------------------------------------------------
 

@@ -7,3 +7,4 @@ Thumbs.db
 
 # Vendored ffmpeg/ffprobe binaries (downloaded for testing)
 vendor/
+.aider*

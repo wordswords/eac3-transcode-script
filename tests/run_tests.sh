@@ -33,7 +33,8 @@ for test_file in "$TESTS_DIR"/test_*.bash; do
     [[ "$(basename "$test_file")" == "test_helper.bash" ]] && continue
     label="$(basename "$test_file")"
 
-    output="$(bash "$test_file" 2>&1)"
+    status=0
+    output="$(bash "$test_file" 2>&1)" || status=$?
 
     printf '===== %s =====\n' "$label"
     printf '%s\n' "$output"
@@ -41,6 +42,13 @@ for test_file in "$TESTS_DIR"/test_*.bash; do
     TEST_FILE_PASS=0
     TEST_FILE_FAIL=0
     extract_counts "$output"
+
+    if [[ "$status" -ne 0 ]]; then
+        TEST_FILE_FAIL=$(( TEST_FILE_FAIL + 1 ))
+    elif [[ -z "$(printf '%s\n' "$output" | grep -E '^[^:]+: [0-9]+ passed, [0-9]+ failed' | tail -1)" \
+        && "$output" != SKIP:* ]]; then
+        TEST_FILE_FAIL=$(( TEST_FILE_FAIL + 1 ))
+    fi
 
     TOTAL_PASS=$(( TOTAL_PASS + TEST_FILE_PASS ))
     TOTAL_FAIL=$(( TOTAL_FAIL + TEST_FILE_FAIL ))

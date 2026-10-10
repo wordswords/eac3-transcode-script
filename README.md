@@ -1,16 +1,16 @@
 # eac3-transcode-script
 
-Detect media files containing E-AC-3 audio and add Windows 11 / Plex
-compatible audio tracks while preserving the original E-AC-3 stream. For each
-E-AC-3 stream the script adds:
+Detect media files containing E-AC-3 or Dolby TrueHD/Atmos audio and add
+Windows 11 / Plex compatible audio tracks while preserving the original stream.
+For each E-AC-3 or Dolby TrueHD/Atmos stream the script adds:
 
 - an **AAC** track, and
 - a separate **5.1 AC-3** track.
 
-When a file has multiple E-AC-3 streams (e.g. multiple audio languages), each
-stream gets its own AAC + AC-3 pair. The **English** AAC track is marked
-default; if no English track is present, the first E-AC-3 stream's AAC track is
-used as the default.
+When a file has multiple E-AC-3 or Dolby TrueHD/Atmos streams (e.g. multiple
+audio languages), each stream gets its own AAC + AC-3 pair. The **English** AAC
+track is marked default; if no English track is present, the first fallback
+source stream's AAC track is used as the default.
 
 Integrity is verified before replacing the original file in place. Finally, the
 script removes accidental duplicate audio streams (collapsing streams that share
@@ -26,18 +26,19 @@ Transcode a single file:
 ./transcode-eac3.sh /path/to/media/file.mkv
 ```
 
-Transcode every E-AC-3 file in a directory (recursively), inside a
-named `screen` session:
+Transcode every E-AC-3 or Dolby TrueHD/Atmos file in a directory (recursively),
+inside a named `screen` session:
 
 ```bash
 ./transcode-directory.sh /path/to/media/directory
 ```
 
 The directory script recurses through all subdirectories under the given
-path, scanning for `.mp4`/`.mkv` files containing E-AC-3 audio, then runs
-`transcode-eac3.sh` on each. All work runs inside a `screen` session named
-`eac3-conversion-screen`, so you can detach (`Ctrl-A` `D`) and re-attach later
-(`screen -r eac3-conversion-screen`) without interrupting the batch.
+path, scanning for `.mp4`/`.mkv` files containing E-AC-3 or Dolby TrueHD/Atmos
+audio, then runs `transcode-eac3.sh` on each. All work runs inside a `screen`
+session named `eac3-conversion-screen`, so you can detach (`Ctrl-A` `D`) and
+re-attach later (`screen -r eac3-conversion-screen`) without interrupting the
+batch.
 
 Requirements: `ffmpeg` and `ffprobe` on the `PATH` (available from the
 AlmaLinux base/extras repositories via `dnf install ffmpeg`), plus `screen`
@@ -45,9 +46,9 @@ for the directory batch script.
 
 ## Performance & progress
 
-- **Audio-only transcoding** — video and the original E-AC-3 stream are copied
-  bit-for-bit. Only the AAC and 5.1 AC-3 companion tracks are encoded (CPU audio
-  encode, typically 50–150× realtime).
+- **Audio-only transcoding** — video and the original E-AC-3/TrueHD stream are
+  copied bit-for-bit. Only the AAC and 5.1 AC-3 companion tracks are encoded
+  (CPU audio encode, typically 50–150× realtime).
 - **Multi-threaded** — both transcode and verification use `-threads 0` to use
   all available cores.
 - **Live progress** — the transcode shows ffmpeg's `-stats` line

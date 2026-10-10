@@ -29,6 +29,11 @@ make_aac_media_file "$TEMP_DIR/aac.mkv"
 actual="$(find_eac3_stream_indices "$TEMP_DIR/aac.mkv")"
 assert_equal "" "$actual" "no E-AC-3 stream detected"
 
+begin_test "detects Dolby TrueHD/Atmos 7.1 as a fallback source"
+make_truehd_71_media_file "$TEMP_DIR/atmos.mkv"
+actual="$(find_eac3_stream_indices "$TEMP_DIR/atmos.mkv")"
+assert_equal "1" "$actual" "TrueHD/Atmos stream index detected"
+
 begin_test "detects E-AC-3 in an MP4 container"
 make_eac3_mp4_file "$TEMP_DIR/eac3.mp4"
 actual="$(find_eac3_stream_indices "$TEMP_DIR/eac3.mp4")"

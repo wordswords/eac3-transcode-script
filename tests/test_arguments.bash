@@ -49,6 +49,30 @@ assert_contains "$args" "-c:2 aac" "AAC companion encoded"
 assert_contains "$args" "-c:3 ac3" "AC-3 companion encoded"
 assert_contains "$args" "-ac:3 6" "AC-3 companion is 5.1"
 
+begin_test "Dolby TrueHD/Atmos 7.1 file produces copy + AAC + AC-3 with AAC as default"
+make_truehd_71_media_file "$TEMP_DIR/atmos.mkv"
+args="$(build_args "$TEMP_DIR/atmos.mkv")"
+
+assert_contains "$args" "-map 0:1 -map 0:1 -map 0:1" "TrueHD/Atmos stream mapped three times"
+assert_contains "$args" "-disposition:1 0" "TrueHD/Atmos default cleared"
+assert_contains "$args" "-disposition:2 default" "TrueHD/Atmos AAC companion is default"
+assert_contains "$args" "-disposition:3 0" "TrueHD/Atmos AC-3 companion is non-default"
+assert_contains "$args" "-c:1 copy" "TrueHD/Atmos codec copied"
+assert_contains "$args" "-c:2 aac" "TrueHD/Atmos AAC companion encoded"
+assert_contains "$args" "-c:3 ac3" "TrueHD/Atmos AC-3 companion encoded"
+assert_contains "$args" "-ac:3 6" "TrueHD/Atmos AC-3 companion is 5.1"
+
+begin_test "Dolby TrueHD/Atmos 8-channel probe data keeps all eight AAC channels"
+args="$(
+    probe_audio_streams() { printf '1,truehd,8\n'; }
+    probe_all_streams() { printf '0,mpeg4,video,\n1,truehd,audio,8\n'; }
+    probe_audio_stream_metadata() { printf '1,truehd,8,\n'; }
+    build_args "$TEMP_DIR/fake-atmos.mkv"
+)"
+assert_contains "$args" "-b:2 768k" "TrueHD/Atmos AAC bitrate uses all eight channels"
+assert_contains "$args" "-ac:2 8" "TrueHD/Atmos AAC companion keeps eight channels"
+assert_contains "$args" "-ac:3 6" "TrueHD/Atmos AC-3 companion remains 5.1"
+
 begin_test "AAC file produces only copies and no companions"
 make_aac_media_file "$TEMP_DIR/aac.mkv"
 args="$(build_args "$TEMP_DIR/aac.mkv")"

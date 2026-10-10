@@ -24,7 +24,7 @@ fi
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Build a directory tree containing a mix of E-AC-3 and non-E-AC-3 media.
+# Build a directory tree containing a mix of fallback-source and non-matching media.
 make_mixed_media_tree() {
     local root="$1"
     mkdir -p "$root/subdir"
@@ -32,6 +32,7 @@ make_mixed_media_tree() {
     make_aac_media_file "$root/b.mkv" >/dev/null 2>&1
     make_eac3_mp4_file "$root/subdir/c.mp4" >/dev/null 2>&1
     make_aac_mp4_file "$root/subdir/d.mp4" >/dev/null 2>&1
+    make_truehd_71_media_file "$root/subdir/atmos.mkv" >/dev/null 2>&1
     printf 'not-a-video' > "$root/note.txt"
 }
 
@@ -61,6 +62,14 @@ else
     fail "MP4 E-AC-3 not detected"
 fi
 
+begin_test "has_eac3_audio detects Dolby TrueHD/Atmos 7.1"
+make_truehd_71_media_file "$TEMP_DIR/atmos.mkv" >/dev/null 2>&1
+if has_eac3_audio "$TEMP_DIR/atmos.mkv"; then
+    ok "TrueHD/Atmos detected"
+else
+    fail "TrueHD/Atmos not detected"
+fi
+
 begin_test "has_eac3_audio rejects AAC-only files"
 make_aac_media_file "$TEMP_DIR/aac.mkv" >/dev/null 2>&1
 if has_eac3_audio "$TEMP_DIR/aac.mkv"; then
@@ -88,9 +97,10 @@ build_eac3_manifest "$TEMP_DIR/media" "$manifest"
 
 content="$(read_manifest "$manifest")"
 
-# Expect exactly two entries: a.mkv and subdir/c.mp4.
+# Expect exactly three entries: a.mkv, subdir/c.mp4, and subdir/atmos.mkv.
 assert_contains "$content" "a.mkv" "E-AC-3 MKV included"
 assert_contains "$content" "c.mp4" "E-AC-3 MP4 included (recursive)"
+assert_contains "$content" "atmos.mkv" "TrueHD/Atmos MKV included (recursive)"
 if [[ "$content" == *"b.mkv"* || "$content" == *"d.mp4"* || "$content" == *"note.txt"* ]]; then
     fail "manifest should exclude AAC-only and non-media files"
 else
@@ -99,7 +109,7 @@ fi
 
 begin_test "manifest count matches expected E-AC-3 file count"
 count="$(tr -cd '\0' < "$manifest" | wc -c)"
-assert_equal "2" "$count" "exactly two E-AC-3 files"
+assert_equal "3" "$count" "exactly three fallback-source files"
 
 begin_test "empty directory yields an empty manifest"
 mkdir -p "$TEMP_DIR/empty"

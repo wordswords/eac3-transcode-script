@@ -2,8 +2,9 @@
 #
 # transcode-directory.sh
 #
-# Scan a directory (recursively) for .mp4 and .mkv files that contain E-AC-3
-# audio, then transcode each one using the sibling transcode-eac3.sh script.
+# Scan a directory (recursively) for .mp4 and .mkv files that contain E-AC-3 or
+# Dolby TrueHD/Atmos audio, then transcode each one using the sibling
+# transcode-eac3.sh script.
 # All conversion work runs inside a named `screen` session so it can survive a
 # disconnect and be monitored/re-attached later.
 #
@@ -21,6 +22,7 @@ readonly SCREEN_SESSION="eac3-conversion-screen"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly TRANSCODE_SCRIPT="${SCRIPT_DIR}/transcode-eac3.sh"
 readonly EAC3_CODEC="eac3"           # ffmpeg codec name for Dolby Digital Plus
+readonly TRUEHD_CODEC="truehd"       # ffmpeg codec name for Dolby TrueHD / Atmos
 readonly WORKER_FILENAME=".eac3-batch-worker.sh"
 readonly MANIFEST_FILENAME=".eac3-batch-manifest"
 readonly SUMMARY_LOG_FILENAME="eac3-conversion.log"
@@ -74,11 +76,11 @@ require_command() {
 }
 
 # ----------------------------------------------------------------------------
-# E-AC-3 detection across the directory tree
+# E-AC-3 / Dolby TrueHD-Atmos detection across the directory tree
 # ----------------------------------------------------------------------------
 
-# Return 0 if the file contains an E-AC-3 audio stream.
-has_eac3_audio() {
+# Return 0 if the file contains audio that should get AAC/AC-3 fallbacks.
+has_fallback_source_audio() {
     local file="$1"
 
     ffprobe -v error \
@@ -87,10 +89,15 @@ has_eac3_audio() {
         -of default=noprint_wrappers=1:nokey=1 \
         -- "$file" 2>/dev/null \
         | tr -d '\r' \
-        | grep -qx "$EAC3_CODEC"
+        | grep -Exq "(${EAC3_CODEC}|${TRUEHD_CODEC})"
 }
 
-# Write the NUL-delimited list of E-AC-3 files to <output_file>.
+# Backwards-compatible name retained for tests/older callers.
+has_eac3_audio() {
+    has_fallback_source_audio "$1"
+}
+
+# Write the NUL-delimited list of fallback-source files to <output_file>.
 build_eac3_manifest() {
     local directory="$1"
     local output_file="$2"
@@ -100,7 +107,7 @@ build_eac3_manifest() {
     : > "$output_file"
 
     while IFS= read -r -d '' file; do
-        if has_eac3_audio "$file"; then
+        if has_fallback_source_audio "$file"; then
             printf '%s\0' "$file" >> "$output_file"
         fi
     done < <(find "$directory" -type f \( -iname '*.mp4' -o -iname '*.mkv' \) -print0)
@@ -187,12 +194,12 @@ main() {
     manifest_path="$(make_manifest_path "$directory")"
     summary_log="${directory}/${SUMMARY_LOG_FILENAME}"
 
-    log "Scanning for E-AC-3 files under: $directory"
+    log "Scanning for E-AC-3/Dolby TrueHD-Atmos files under: $directory"
     build_eac3_manifest "$directory" "$manifest_path"
 
     local count
     count="$(tr -cd '\0' < "$manifest_path" | wc -c)"
-    log "Found $count media file(s) with E-AC-3 audio."
+    log "Found $count media file(s) with E-AC-3/Dolby TrueHD-Atmos audio."
 
     if (( count == 0 )); then
         log "Nothing to transcode."
